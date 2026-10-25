@@ -1,4 +1,4 @@
-const CACHE_NAME = 'storm-creek-v4';
+const CACHE_NAME = 'storm-creek-v5';
 
 // Use relative paths so it works on GitHub Pages (subdirectory) and locally
 const ASSET_PATHS = [

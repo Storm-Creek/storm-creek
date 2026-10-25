@@ -211,7 +211,7 @@ function renderFlow(container) {
       <div class="workout-round">${state.mobilityIndex + 1} / ${total} \u2014 about ${remainingMin} min left</div>
       <div class="workout-exercise-name">${movement.name}</div>
       <div class="workout-cue">${movement.cue}</div>
-      <a href="https://www.youtube.com/results?search_query=${encodeURIComponent(movement.videoSearch)}"
+      <a href="${flowVideoUrl(movement)}" id="btn-video"
          target="_blank" rel="noopener"
          style="display: inline-block; padding: 8px 20px; margin: 8px 0;
                 background: var(--bg-elevated); border: 1px solid var(--accent-steel);
@@ -256,8 +256,17 @@ function renderFlow(container) {
   const pauseBtn = container.querySelector('#btn-pause');
   pauseBtn.addEventListener('click', () => {
     state.flowPaused = !state.flowPaused;
-    if (state.flowPaused) state.timer.stop(); else state.timer.start();
+    if (state.flowPaused) state.timer.stop(); else { state.timer.start(); requestWakeLock(); }
     pauseBtn.textContent = state.flowPaused ? 'RESUME' : 'PAUSE';
+    saveState();
+  });
+
+  // Watching the video pauses the movement so it doesn't run out meanwhile
+  container.querySelector('#btn-video').addEventListener('click', () => {
+    if (state.flowPaused) return;
+    state.flowPaused = true;
+    state.timer.stop();
+    pauseBtn.textContent = 'RESUME';
     saveState();
   });
 
@@ -265,6 +274,13 @@ function renderFlow(container) {
   container.querySelector('#btn-next').addEventListener('click', () => goTo(state.mobilityIndex + 1));
 
   bindQuitButton(container);
+}
+
+function flowVideoUrl(movement) {
+  if (movement.video) {
+    return `https://www.youtube.com/watch?v=${movement.video}&t=${movement.videoStart || 0}s`;
+  }
+  return `https://www.youtube.com/results?search_query=${encodeURIComponent(movement.videoSearch)}`;
 }
 
 function logFlowMovement(movement) {

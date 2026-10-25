@@ -1,5 +1,6 @@
 // Active workout screen — state machine driving the workout flow
 // States: forge → transit → exercise → (repeat) → recede → summary
+// Flow routines (Still Water Tai Chi): flow → summary, auto-advancing
 
 import { getRoutine } from '../data/routines.js';
 import { exercises as exerciseLib } from '../data/exercises.js';
@@ -15,6 +16,8 @@ import { showExerciseModal } from '../components/exercise-modal.js';
 
 // Workout state
 let state = null;
+let flowAdvanceTimeout = null;
+let wakeLock = null;
 
 function initState(routineId) {
   const routine = getRoutine(routineId);
@@ -31,7 +34,7 @@ function initState(routineId) {
   return {
     routineId,
     routine,
-    phase: 'forge', // forge | storm | transit | recede | summary
+    phase: routine.flow ? 'flow' : 'forge', // flow | forge | storm | transit | recede | summary
     currentRound: 1,
     totalRounds: rounds,
     isDeload,
@@ -81,6 +84,7 @@ function renderCurrentPhase(container) {
   cleanup();
 
   switch (state.phase) {
+    case 'flow': renderFlow(container); break;
     case 'forge': renderMobility(container, forgeSequence, 'forge'); break;
     case 'storm': renderStormExercise(container); break;
     case 'transit': renderTransit(container); break;
@@ -179,6 +183,114 @@ function renderMobility(container, sequence, phase) {
   });
 
   bindQuitButton(container);
+}
+
+// ── FLOW (Tai Chi — timed, hands-free) ──
+
+function renderFlow(container) {
+  const sequence = state.routine.flow;
+  const movement = sequence.movements[state.mobilityIndex];
+  if (!movement) {
+    state.phase = 'summary';
+    renderCurrentPhase(container);
+    return;
+  }
+
+  requestWakeLock();
+  if (state.flowPaused === undefined) state.flowPaused = false;
+
+  const total = sequence.movements.length;
+  const remainingMin = Math.ceil(
+    sequence.movements.slice(state.mobilityIndex).reduce((s, m) => s + m.seconds, 0) / 60
+  );
+  const next = sequence.movements[state.mobilityIndex + 1];
+
+  container.innerHTML = `
+    <div class="workout-screen">
+      <div class="workout-phase-label">${movement.section}</div>
+      <div class="workout-round">${state.mobilityIndex + 1} / ${total} \u2014 about ${remainingMin} min left</div>
+      <div class="workout-exercise-name">${movement.name}</div>
+      <div class="workout-cue">${movement.cue}</div>
+      <a href="https://www.youtube.com/results?search_query=${encodeURIComponent(movement.videoSearch)}"
+         target="_blank" rel="noopener"
+         style="display: inline-block; padding: 8px 20px; margin: 8px 0;
+                background: var(--bg-elevated); border: 1px solid var(--accent-steel);
+                border-radius: 8px; color: var(--text-primary); text-decoration: none;
+                font-size: 14px; font-weight: 600;">
+        \u25B6 How do I do this?
+      </a>
+      <div id="timer-container"></div>
+      <div class="text-dim" style="font-size: 13px; margin: 4px 0 12px;">
+        ${next ? 'Next: ' + next.name : 'Last one'}
+      </div>
+      <button class="btn-done" id="btn-pause">${state.flowPaused ? 'RESUME' : 'PAUSE'}</button>
+      <div style="display: flex; gap: 8px; margin-top: 12px;">
+        <button class="btn btn-secondary btn-small" id="btn-back"
+                style="flex: 1; min-height: 44px;" ${state.mobilityIndex === 0 ? 'disabled' : ''}>\u2190 Back</button>
+        <button class="btn btn-secondary btn-small" id="btn-next"
+                style="flex: 1; min-height: 44px;">Next \u2192</button>
+      </div>
+      ${renderQuitButton()}
+    </div>
+  `;
+
+  const goTo = (idx) => {
+    if (flowAdvanceTimeout) { clearTimeout(flowAdvanceTimeout); flowAdvanceTimeout = null; }
+    if (idx > state.mobilityIndex) logFlowMovement(movement);
+    state.mobilityIndex = Math.max(0, idx);
+    renderCurrentPhase(container);
+  };
+
+  const timerContainer = container.querySelector('#timer-container');
+  state.timer = new Timer(timerContainer, {
+    mode: 'countdown',
+    targetSeconds: movement.seconds,
+    onComplete: () => {
+      if (store.getSettings().soundEnabled) audio.chime();
+      // Short breath before the next movement appears
+      flowAdvanceTimeout = setTimeout(() => goTo(state.mobilityIndex + 1), 2500);
+    }
+  });
+  if (!state.flowPaused) state.timer.start();
+
+  const pauseBtn = container.querySelector('#btn-pause');
+  pauseBtn.addEventListener('click', () => {
+    state.flowPaused = !state.flowPaused;
+    if (state.flowPaused) state.timer.stop(); else state.timer.start();
+    pauseBtn.textContent = state.flowPaused ? 'RESUME' : 'PAUSE';
+    saveState();
+  });
+
+  container.querySelector('#btn-back').addEventListener('click', () => goTo(state.mobilityIndex - 1));
+  container.querySelector('#btn-next').addEventListener('click', () => goTo(state.mobilityIndex + 1));
+
+  bindQuitButton(container);
+}
+
+function logFlowMovement(movement) {
+  addExerciseEntry(state.log, {
+    exerciseId: movement.name,
+    stationId: 'flow',
+    round: 1,
+    trackingType: 'timed',
+    value: state.timer ? state.timer.getSeconds() : 0
+  });
+}
+
+async function requestWakeLock() {
+  // Keep the screen on so the phone can sit on the ground during the flow
+  try {
+    if (!wakeLock && 'wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  } catch {
+    // Not supported or denied — screen may sleep
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
 }
 
 // ── STORM (Main Circuit) ──
@@ -398,6 +510,7 @@ function renderTransit(container) {
 
 function renderSummary(container) {
   document.body.classList.remove('in-workout');
+  releaseWakeLock();
   const settings = store.getSettings();
   if (settings.soundEnabled) audio.complete();
 
@@ -447,9 +560,10 @@ function renderSummary(container) {
           <span class="text-bone">${duration} min</span>
         </div>
         <div class="summary-stat">
-          <span>Exercises</span>
+          <span>${state.routine.flow ? 'Movements' : 'Exercises'}</span>
           <span class="text-bone">${totalExercises}</span>
         </div>
+        ${state.routine.flow ? '' : `
         <div class="summary-stat">
           <span>Total Reps</span>
           <span class="text-bone">${totalReps}</span>
@@ -457,7 +571,7 @@ function renderSummary(container) {
         <div class="summary-stat">
           <span>Rounds</span>
           <span class="text-bone">${state.currentRound} / ${state.totalRounds}</span>
-        </div>
+        </div>`}
       </div>
 
       <div class="card">
@@ -525,6 +639,10 @@ function bindQuitButton(container) {
 }
 
 function cleanup() {
+  if (flowAdvanceTimeout) {
+    clearTimeout(flowAdvanceTimeout);
+    flowAdvanceTimeout = null;
+  }
   if (state && state.timer) {
     state.timer.destroy();
     state.timer = null;
@@ -539,6 +657,7 @@ function cleanup() {
 window.addEventListener('hashchange', () => {
   if (state && !window.location.hash.startsWith('#workout')) {
     cleanup();
+    releaseWakeLock();
     document.body.classList.remove('in-workout');
   }
 });

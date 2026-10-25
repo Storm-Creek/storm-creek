@@ -1,15 +1,18 @@
 // Home dashboard screen
 
 import { store } from '../models/store.js';
-import { routines, getNextRoutineId, getRoutine } from '../data/routines.js';
+import { routines, getNextRoutineId, getRoutine, isDailyRoutine } from '../data/routines.js';
 import { getLogDurationMinutes, getLogTotalReps } from '../models/workout-log.js';
 import { getCalledCountToday, logCalledExercise } from '../utils/notifications.js';
 import { calledExercises } from '../data/exercises.js';
 import { showExerciseModal } from '../components/exercise-modal.js';
 
 export function renderHome(container) {
-  const weekLogs = store.getWeekLogs();
-  const allLogs = store.getWorkoutLogs();
+  // Daily Tai Chi lives outside the 3-4 day strength rotation
+  const allSessions = store.getWorkoutLogs();
+  const dailyLogs = allSessions.filter(l => isDailyRoutine(l.routineId));
+  const weekLogs = store.getWeekLogs().filter(l => !isDailyRoutine(l.routineId));
+  const allLogs = allSessions.filter(l => !isDailyRoutine(l.routineId));
   const weekRoutineIds = weekLogs.map(l => l.routineId);
   const nextRoutineId = getNextRoutineId(weekRoutineIds);
   const nextRoutine = getRoutine(nextRoutineId);
@@ -26,11 +29,12 @@ export function renderHome(container) {
 
       ${savedWorkout ? renderResumeCard(savedWorkout) : ''}
       ${renderLastWorkoutAlert(allLogs)}
+      ${renderDailyFlow(dailyLogs)}
       ${renderCalledBanner()}
       ${renderWeekProgress(weekLogs)}
       ${renderNextWorkout(nextRoutine, weekLogs.length, allLogs)}
-      ${renderMetrics(allLogs)}
-      ${renderRecentSessions(allLogs.slice(-5).reverse())}
+      ${renderMetrics(allSessions)}
+      ${renderRecentSessions(allSessions.slice(-5).reverse())}
     </div>
   `;
 
@@ -142,6 +146,35 @@ function renderWeekProgress(weekLogs) {
   `;
 }
 
+function renderDailyFlow(dailyLogs) {
+  const routine = routines.find(r => r.daily);
+  if (!routine) return '';
+
+  // Streak: consecutive days ending today (or yesterday, if today isn't done yet)
+  const dayKey = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
+  const doneDays = new Set(dailyLogs.map(l => dayKey(l.date)));
+  const today = dayKey(new Date());
+  const doneToday = doneDays.has(today);
+  let streak = 0;
+  let cursor = doneToday ? today : today - 86400000;
+  while (doneDays.has(cursor)) { streak++; cursor -= 86400000; }
+
+  return `
+    <div class="card" style="${doneToday ? 'border-color: var(--success);' : ''}">
+      <div class="card-header">
+        <h3 style="margin: 0;">DAILY</h3>
+        <span class="badge badge-steel">${streak} day streak</span>
+      </div>
+      <div style="margin: 12px 0;">
+        <div style="font-size: 24px; font-weight: 700;">${routine.icon} ${routine.name}</div>
+        <p class="text-dim" style="margin-top: 4px;">${routine.description}</p>
+        ${doneToday ? '<p style="color: var(--success); font-weight: 600; margin-top: 8px;">Done today.</p>' : ''}
+      </div>
+      <button class="btn ${doneToday ? 'btn-secondary' : 'btn-primary'}" id="btn-daily">START TAI CHI</button>
+    </div>
+  `;
+}
+
 function renderNextWorkout(routine, weekCount, allLogs) {
   if (!routine) return '';
 
@@ -159,7 +192,7 @@ function renderNextWorkout(routine, weekCount, allLogs) {
     }
   }
 
-  const typeLastDone = routines.map(r => {
+  const typeLastDone = routines.filter(r => !r.daily).map(r => {
     const days = lastDoneByType[r.id];
     let label, cls;
     if (days === undefined) { label = 'never'; cls = 'stale'; }
@@ -263,6 +296,13 @@ function bindEvents(container, nextRoutineId, savedWorkout) {
   if (startBtn) {
     startBtn.addEventListener('click', () => {
       window.location.hash = '#workout/' + nextRoutineId;
+    });
+  }
+
+  const dailyBtn = container.querySelector('#btn-daily');
+  if (dailyBtn) {
+    dailyBtn.addEventListener('click', () => {
+      window.location.hash = '#workout/still_water';
     });
   }
 

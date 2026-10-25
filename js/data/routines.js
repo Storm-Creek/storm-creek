@@ -1,6 +1,9 @@
 // Pre-built workout routines — 4 types
 // Each routine: FORGE → STORM phases → RECEDE
 // Rotation: Ridge Run → Dark Water → Ridge Run → Storm Fire
+// Still Water is the daily Tai Chi flow — outside the rotation (daily: true)
+
+import { taichiSequence } from './taichi.js';
 
 export const routines = [
   {
@@ -212,8 +215,27 @@ export const routines = [
         ]
       }
     ]
+  },
+
+  {
+    id: 'still_water',
+    name: 'Still Water',
+    type: 'tai_chi',
+    description: 'Daily morning Tai Chi and Qigong. About 25 minutes. Hands-free: it moves on by itself.',
+    shooting: false,
+    daily: true,
+    icon: '\u262F',
+    rounds: 1,
+    deloadRounds: 1,
+    flow: taichiSequence,
+    phases: []
   }
 ];
+
+export function isDailyRoutine(id) {
+  const r = getRoutine(id);
+  return !!(r && r.daily);
+}
 
 // Week rotation pattern
 // 4-day week: Ridge Run → Dark Water → Ridge Run → Storm Fire

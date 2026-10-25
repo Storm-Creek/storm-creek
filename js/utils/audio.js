@@ -56,6 +56,12 @@ export const audio = {
     playTone(600, 0.05, 'sine', 0.1);
   },
 
+  // Soft bell between Tai Chi movements
+  chime() {
+    playTone(528, 1.5, 'sine', 0.25);
+    setTimeout(() => playTone(792, 1.2, 'sine', 0.12), 40);
+  },
+
   // PR achieved
   pr() {
     playTone(523, 0.1, 'sine', 0.3);
